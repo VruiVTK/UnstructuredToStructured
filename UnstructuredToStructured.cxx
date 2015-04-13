@@ -15,22 +15,30 @@
 #include <vtkXMLImageDataWriter.h>
 #include <vtkCellData.h>
 #include <vtkPointData.h>
-#include <vtkGaussianSplatter.h>
 #include <vtkCellDataToPointData.h>
 #include <vtkDoubleArray.h>
+#include <vtkTimerLog.h>
 
 #include <iostream>
 #include <sstream>
 
+#define CHECKERBOARD 0
+
+#if CHECKERBOARD
+#include <vtkCheckerboardSplatter.h>
+#else
+#include <vtkGaussianSplatter.h>
+#endif
+
 int main(int argc, char* argv[])
 {
-  vtkNew<vtkRenderWindow> renWin;
-  vtkNew<vtkRenderer> ren;
-  renWin->AddRenderer(ren.GetPointer());
-  vtkNew<vtkRenderWindowInteractor> iren;
-  iren->SetRenderWindow(renWin.GetPointer());
-  vtkNew<vtkInteractorStyleTrackballCamera> style;
-  iren->SetInteractorStyle(style.GetPointer());
+//  vtkNew<vtkRenderWindow> renWin;
+//  vtkNew<vtkRenderer> ren;
+//  renWin->AddRenderer(ren.GetPointer());
+//  vtkNew<vtkRenderWindowInteractor> iren;
+//  iren->SetRenderWindow(renWin.GetPointer());
+//  vtkNew<vtkInteractorStyleTrackballCamera> style;
+//  iren->SetInteractorStyle(style.GetPointer());
 
   vtkNew<vtkExodusIIReader> reader;
   reader->SetFileName(argv[1]);
@@ -58,19 +66,23 @@ int main(int argc, char* argv[])
 
   reader->Update();
 
-
-  std::cout << arrayCount << std::endl;
+  vtkNew<vtkTimerLog> timer;
+  std::cout << "Start timer" << std::endl;
+  timer->StartTimer();
 
   double dif = 256.0/arrayCount;
 
   vtkSmartPointer<vtkMultiBlockDataSet> mb = reader->GetOutput();
 
-  for (vtkIdType i = 0; i < mb->GetNumberOfBlocks(); ++i)
+//  for (vtkIdType i = 0; i < mb->GetNumberOfBlocks(); ++i)
+  for (vtkIdType i = 0; i < 1; ++i)
     {
     vtkSmartPointer<vtkMultiBlockDataSet> mbi = vtkMultiBlockDataSet::SafeDownCast(mb->GetBlock(i));
     if (mbi)
       {
-      for (vtkIdType j = 0; j < mbi->GetNumberOfBlocks(); ++j)
+//      for (vtkIdType j = 0; j < mbi->GetNumberOfBlocks(); ++j)
+      //We know that all the information is in the first block
+      for (vtkIdType j = 0; j < 1; ++j)
         {
         vtkSmartPointer<vtkUnstructuredGrid> usg = vtkUnstructuredGrid::SafeDownCast(mbi->GetBlock(j));
         if (usg)
@@ -81,7 +93,8 @@ int main(int argc, char* argv[])
 //          vtkSmartPointer<vtkUnstructuredGrid> usgg = vtkUnstructuredGrid::SafeDownCast(
 //            cellToPoint->GetOutput());
 
-          vtkSmartPointer<vtkImageData> imageData = vtkSmartPointer<vtkImageData>::New();
+          vtkSmartPointer<vtkImageData> imageData =
+            vtkSmartPointer<vtkImageData>::New();
           vtkSmartPointer<vtkDoubleArray> imageArray =
             vtkSmartPointer<vtkDoubleArray>::New();
           imageArray->SetName("GrainSegmentationValues");
@@ -89,18 +102,22 @@ int main(int argc, char* argv[])
           for (vtkIdType k = 0; k < arrayCount; ++k)
             {
             usg->GetPointData()->SetActiveScalars(usg->GetPointData()->GetArrayName(k));
-            std::cout << usg->GetPointData()->GetArrayName(k) << std::endl;
+            std::cout << "Splatting array: " <<
+              usg->GetPointData()->GetArrayName(k) << std::endl;
 
+#if CHECKERBOARD
+            vtkNew<vtkCheckerboardSplatter> gaussian;
+#else
             vtkNew<vtkGaussianSplatter> gaussian;
+#endif
             gaussian->SetInputData(usg);
             gaussian->SetModelBounds(usg->GetBounds());
             gaussian->ScalarWarpingOn();
             gaussian->NormalWarpingOff();
-            gaussian->SetRadius(0.01);
-            gaussian->SetExponentFactor(-1);
             gaussian->Update();
-            vtkSmartPointer<vtkImageData> im = vtkImageData::SafeDownCast(gaussian->GetOutput());
-            vtkSmartPointer<vtkDataArray> dataArray = vtkDataArray::SafeDownCast(im->GetPointData()->GetArray("SplatterValues"));
+            vtkSmartPointer<vtkImageData> im = gaussian->GetOutput();
+            vtkSmartPointer<vtkDataArray> dataArray =
+                im->GetPointData()->GetScalars();
             double * dataRange = dataArray->GetRange();
             if (k == 0)
               {
@@ -118,14 +135,23 @@ int main(int argc, char* argv[])
 //                imageArray->SetTuple1(val, (double)k*(255-dif)/arrayCount + dif);
                 }
               }
-            }
+          }
+
+          imageData->GetPointData()->SetActiveScalars("GrainSegmentationValues");
           vtkNew<vtkXMLImageDataWriter> writer1;
           writer1->SetInputData(imageData);
           std::stringstream ss1;
-          ss1 << argv[1] << "_" << i << "_" << j << ".vti";
+#if CHECKERBOARD
+          ss1 << "imageData_checkerboard" << "_" << i << "_" << j << ".vti";
+#else
+          ss1 << "imageData_gaussian" << "_" << i << "_" << j << ".vti";
+#endif
           writer1->SetFileName(ss1.str().c_str());
+          std::cout << "Writing out " << ss1.str().c_str() << std::endl;
           writer1->Write();
           writer1->Update();
+          timer->StopTimer();
+          std::cout << "Stop Timer. Time spent = " << timer->GetElapsedTime() << std::endl;
           }
         }
       }
